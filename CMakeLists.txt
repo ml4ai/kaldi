@@ -22,7 +22,7 @@ endif()
 
 include(third_party/get_third_party)
 
-include(cmake/third_party/openfst.cmake)
+#include(cmake/third_party/openfst.cmake)
 
 find_package(PythonInterp)
 if(NOT PYTHON_EXECUTABLE)
