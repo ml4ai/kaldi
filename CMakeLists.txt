@@ -190,6 +190,7 @@ if(CUDA_FOUND)
     link_libraries(${NvToolExt_LIBRARIES})
 
 
+    # For Ubuntu 20.04, Cuda 11.4, add the CMake flag -DCUB_ROOT_DIR=/usr/local/cuda/include
     find_package(CUB REQUIRED)
     include_directories(${CUB_INCLUDE_DIR})
 endif()
