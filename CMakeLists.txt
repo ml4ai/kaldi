@@ -8,14 +8,19 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
 include(GNUInstallDirs)
 include(Utils)
 
+option(WITH_CUDA "Enable building Kaldi with CUDA" ON)
+
 if(CONDA_ROOT)
     message(STATUS "Adding ${CONDA_ROOT} directories")
     set(CMAKE_INCLUDE_PATH "${CONDA_ROOT}/include")
     set(CMAKE_LIBRARY_PATH "${CONDA_ROOT}/lib")
     link_directories("${CONDA_ROOT}/lib")
     include_directories("${CONDA_ROOT}/include")
-    if (NOT CUDA_TOOLKIT_ROOT_DIR)
-        set(CUDA_TOOLKIT_ROOT_DIR "${CONDA_ROOT}")
+
+    if(WITH_CUDA)
+        if (NOT CUDA_TOOLKIT_ROOT_DIR)
+            set(CUDA_TOOLKIT_ROOT_DIR "${CONDA_ROOT}")
+        endif()
     endif()
 
 endif()
@@ -29,12 +34,15 @@ if(NOT PYTHON_EXECUTABLE)
     message(FATAL_ERROR "Needs python to auto-generate most CMake files, but not found.")
 endif()
 
-message(STATUS "Running gen_cmake_skeleton.py")
 option(BUILD_SHARED_LIBS "Build shared Kaldi libraries." OFF)
 set(IS_LIB_SHARE "")
+
 if(BUILD_SHARED_LIBS)
+    message(STATUS "Building shared Kaldi libraries is enabled.")
     set(IS_LIB_SHARE "--shared")
 endif()
+
+message(STATUS "Generating CMake skeletons using gen_cmake_skeleton.py")
 execute_process(COMMAND ${PYTHON_EXECUTABLE}
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_cmake_skeleton.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -64,11 +72,15 @@ if(APPLE)
 else()
     set(MATHLIB "OpenBLAS" CACHE STRING "OpenBLAS|MKL|Accelerate")
 endif()
+
+message(STATUS "MATHLIB set to ${MATHLIB}")
+
 option(KALDI_BUILD_EXE "If disabled, will make add_kaldi_executable a no-op" ON)
 option(KALDI_BUILD_TEST "If disabled, will make add_kaldi_test_executable a no-op" ON)
 option(KALDI_USE_PATCH_NUMBER "Use MAJOR.MINOR.PATCH format, otherwise MAJOR.MINOR" OFF)
 
-if (KALDI_BUILD_TEST)
+if(KALDI_BUILD_TEST)
+    message(STATUS "Kaldi test building enabled.")
     include(CTest)
     enable_testing()
 endif()
@@ -79,6 +91,7 @@ find_package(Threads)
 link_libraries(Threads::Threads)
 
 if(CONDA_ROOT)
+    message(STATUS "CONDA_ROOT detected")
     find_package(BLAS REQUIRED)
     find_package(LAPACK REQUIRED)
     link_libraries(BLAS::BLAS)
@@ -98,8 +111,12 @@ if(CONDA_ROOT)
     endif()
 else()
     if(MATHLIB STREQUAL "OpenBLAS")
+        find_package(BLAS REQUIRED)
+        find_package(LAPACK REQUIRED)
         add_definitions(-DHAVE_CLAPACK=1)
         include_directories(${CMAKE_CURRENT_SOURCE_DIR}/tools/CLAPACK)
+        message(STATUS "BLAS Libraries: ${BLAS_LIBRARIES}")
+        message(STATUS "LAPACK Libraries: ${LAPACK_LIBRARIES}")
         link_libraries(${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
     elseif(MATHLIB STREQUAL "MKL")
         if(NOT DEFINED ENV{MKLROOT} OR "$ENV{MKLROOT}" STREQUAL "")
@@ -146,53 +163,57 @@ if(MSVC)
     # some warnings related with fst
     add_compile_options(/wd4018 /wd4244 /wd4267 /wd4291 /wd4305)
 
-    set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
-    if(NOT DEFINED ENV{CUDAHOSTCXX})
-        set(ENV{CUDAHOSTCXX} ${CMAKE_CXX_COMPILER})
-    endif()
-    if(NOT DEFINED CUDA_HOST_COMPILER)
-        set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+    if(WITH_CUDA)
+        set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
+        if(NOT DEFINED ENV{CUDAHOSTCXX})
+            set(ENV{CUDAHOSTCXX} ${CMAKE_CXX_COMPILER})
+        endif()
+        if(NOT DEFINED CUDA_HOST_COMPILER)
+            set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+        endif()
     endif()
 endif()
 
-find_package(CUDAToolkit)
-find_package(CUDA)
-if(CUDA_FOUND)
-    set(CUDA_PROPAGATE_HOST_FLAGS ON)
-    set(KALDI_CUDA_NVCC_FLAGS "--default-stream=per-thread;-std=c++${CMAKE_CXX_STANDARD}")
-    if(MSVC)
-        list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler /permissive-,/FS,/wd4819,/EHsc,/bigobj")
-        list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler /wd4018,/wd4244,/wd4267,/wd4291,/wd4305")
-        if(BUILD_SHARED_LIBS)
-            list(APPEND CUDA_NVCC_FLAGS_RELEASE -Xcompiler /MD)
-            list(APPEND CUDA_NVCC_FLAGS_DEBUG -Xcompiler /MDd)
+if(WITH_CUDA)
+    find_package(CUDAToolkit)
+    find_package(CUDA)
+    if(CUDA_FOUND)
+        set(CUDA_PROPAGATE_HOST_FLAGS ON)
+        set(KALDI_CUDA_NVCC_FLAGS "--default-stream=per-thread;-std=c++${CMAKE_CXX_STANDARD}")
+        if(MSVC)
+            list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler /permissive-,/FS,/wd4819,/EHsc,/bigobj")
+            list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler /wd4018,/wd4244,/wd4267,/wd4291,/wd4305")
+            if(BUILD_SHARED_LIBS)
+                list(APPEND CUDA_NVCC_FLAGS_RELEASE -Xcompiler /MD)
+                list(APPEND CUDA_NVCC_FLAGS_DEBUG -Xcompiler /MDd)
+            endif()
+        else()
+        #     list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler -std=c++${CMAKE_CXX_STANDARD}")
+            list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
         endif()
-    else()
-    #     list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler -std=c++${CMAKE_CXX_STANDARD}")
-        list(APPEND KALDI_CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+        set(CUDA_NVCC_FLAGS ${KALDI_CUDA_NVCC_FLAGS} ${CUDA_NVCC_FLAGS})
+
+        add_definitions(-DHAVE_CUDA=1)
+        add_definitions(-DCUDA_API_PER_THREAD_DEFAULT_STREAM=1)
+        include_directories(${CUDA_INCLUDE_DIRS})
+        link_libraries(
+            ${CUDA_LIBRARIES}
+            ${CUDA_CUDA_LIBRARY}
+            ${CUDA_CUBLAS_LIBRARIES}
+            ${CUDA_CUFFT_LIBRARIES}
+            ${CUDA_curand_LIBRARY}
+            ${CUDA_cusolver_LIBRARY}
+            ${CUDA_cusparse_LIBRARY})
+
+        find_package(NvToolExt REQUIRED)
+        include_directories(${NvToolExt_INCLUDE_DIR})
+        link_libraries(${NvToolExt_LIBRARIES})
+
+
+        # For Ubuntu 20.04, Cuda 11.4, add the CMake flag -DCUB_ROOT_DIR=/usr/local/cuda/include
+        find_package(CUB REQUIRED)
+        include_directories(${CUB_INCLUDE_DIR})
     endif()
-    set(CUDA_NVCC_FLAGS ${KALDI_CUDA_NVCC_FLAGS} ${CUDA_NVCC_FLAGS})
-
-    add_definitions(-DHAVE_CUDA=1)
-    add_definitions(-DCUDA_API_PER_THREAD_DEFAULT_STREAM=1)
-    include_directories(${CUDA_INCLUDE_DIRS})
-    link_libraries(
-        ${CUDA_LIBRARIES}
-        ${CUDA_CUDA_LIBRARY}
-        ${CUDA_CUBLAS_LIBRARIES}
-        ${CUDA_CUFFT_LIBRARIES}
-        ${CUDA_curand_LIBRARY}
-        ${CUDA_cusolver_LIBRARY}
-        ${CUDA_cusparse_LIBRARY})
-
-    find_package(NvToolExt REQUIRED)
-    include_directories(${NvToolExt_INCLUDE_DIR})
-    link_libraries(${NvToolExt_LIBRARIES})
-
-
-    # For Ubuntu 20.04, Cuda 11.4, add the CMake flag -DCUB_ROOT_DIR=/usr/local/cuda/include
-    find_package(CUB REQUIRED)
-    include_directories(${CUB_INCLUDE_DIR})
 endif()
 
 add_definitions(-DKALDI_NO_PORTAUDIO=1)
@@ -257,9 +278,11 @@ if(TENSORFLOW_DIR)
 endif()
 
 # add all cuda libraries
-if(CUDA_FOUND)
-    add_subdirectory(src/cudafeat)
-    add_subdirectory(src/cudadecoder)
+if(WITH_CUDA)
+    if(CUDA_FOUND)
+        add_subdirectory(src/cudafeat)
+        add_subdirectory(src/cudadecoder)
+    endif()
 endif()
 
 # add all native executables
@@ -282,9 +305,11 @@ endif()
 add_subdirectory(src/kwsbin)
 
 # add all cuda executables
-if(CUDA_FOUND)
-    add_subdirectory(src/cudafeatbin)
-    add_subdirectory(src/cudadecoderbin)
+if(WITH_CUDA)
+    if(CUDA_FOUND)
+        add_subdirectory(src/cudafeatbin)
+        add_subdirectory(src/cudadecoderbin)
+    endif()
 endif()
 
 if(NOT CONDA_ROOT)
